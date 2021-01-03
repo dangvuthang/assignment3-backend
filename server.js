@@ -3,7 +3,13 @@ dotenv.config({ path: "./config.env" });
 const app = require("./index");
 const http = require("http");
 const socketio = require("socket.io");
-const { sendMessage } = require("./utils/message");
+const {
+  sendMessage,
+  getUser,
+  userJoin,
+  userLeft,
+  getRoomUsers,
+} = require("./utils/message");
 const server = http.createServer(app);
 const bot = "Chatbox";
 const io = socketio(server, {
@@ -11,33 +17,39 @@ const io = socketio(server, {
     methods: ["GET", "POST"],
   },
 });
-const users = [];
-const createUser = (id, username) => ({ id, username });
-const findUser = id => users.find(user => user.id === id);
 
 io.on("connection", socket => {
   console.log("A new client connect...");
   console.log(socket.id);
-  socket.on("joinChat", username => {
-    users.push(createUser(socket.id, username));
-    console.log("---------------");
-    console.log(users);
-    console.log("---------------");
+  socket.on("joinChat", ({ username, room }) => {
+    const user = userJoin(socket.id, username, room);
+    socket.join(user.room);
     socket.emit("message", sendMessage(bot, `Welcome to ${bot}, ${username}`));
-    socket.broadcast.emit(
-      "message",
-      sendMessage(bot, `${username} has joined the chat`)
-    );
+    socket.broadcast
+      .to(user.room)
+      .emit("message", sendMessage(bot, `${username} has joined the chat`));
+    io.to(user.room).emit("roomUsers", {
+      room: user.room,
+      users: getRoomUsers(user.room),
+    });
   });
   socket.on("disconnect", () => {
-    io.emit(
-      "message",
-      sendMessage(bot, `${findUser(socket.id).username} has left the chat`)
-    );
+    const user = userLeft(socket.id);
+    console.log(user);
+    if (user)
+      io.to(user.room).emit(
+        "message",
+        sendMessage(bot, `${user.username} has left the chat`)
+      );
+    io.to(user.room).emit("roomUsers", {
+      room: user.room,
+      users: getRoomUsers(user.room),
+    });
   });
-  socket.on("chatMessage", message =>
-    io.emit("message", sendMessage(findUser(socket.id).username, message))
-  );
+  socket.on("chatMessage", message => {
+    const user = getUser(socket.id);
+    io.to(user.room).emit("message", sendMessage(user.username, message));
+  });
 });
 
 const port = process.env.PORT || 5000;
